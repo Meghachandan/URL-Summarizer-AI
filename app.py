@@ -1,19 +1,18 @@
 import re
 import traceback
-import validators
 import streamlit as st
+import validators
 
-from langchain_core.prompts import PromptTemplate
 from langchain_core.documents import Document
+from langchain_core.prompts import PromptTemplate
 from langchain_groq import ChatGroq
-from langchain.chains.summarize import load_summarize_chain
 from langchain_community.document_loaders import UnstructuredURLLoader
 from youtube_transcript_api import YouTubeTranscriptApi
 
-# ---------------- Streamlit ----------------
+# -------------------- STREAMLIT --------------------
 
 st.set_page_config(
-    page_title="AI URL Summarizer",
+    page_title="AI URL & YouTube Summarizer",
     page_icon="📝",
     layout="wide"
 )
@@ -26,30 +25,16 @@ with st.sidebar:
         type="password"
     )
 
-generic_url = st.text_input(
-    "Enter Website or YouTube URL"
-)
+url = st.text_input("Enter Website or YouTube URL")
 
-# ---------------- LLM ----------------
+# -------------------- LLM --------------------
 
 llm = ChatGroq(
     model="llama-3.3-70b-versatile",
     groq_api_key=groq_api_key
 )
 
-# ---------------- Prompt ----------------
-
-prompt = PromptTemplate(
-    template="""
-Summarize the following content in about 300 words.
-
-Content:
-{text}
-""",
-    input_variables=["text"]
-)
-
-# ---------------- Helper ----------------
+# -------------------- FUNCTIONS --------------------
 
 def extract_video_id(url):
     patterns = [
@@ -66,87 +51,89 @@ def extract_video_id(url):
     return None
 
 
-# ---------------- Button ----------------
+def load_youtube(video_url):
+    video_id = extract_video_id(video_url)
+
+    if not video_id:
+        raise Exception("Invalid YouTube URL")
+
+    api = YouTubeTranscriptApi()
+
+    transcript_list = api.list(video_id)
+
+    # Automatically pick the first available transcript
+    transcript = next(iter(transcript_list))
+
+    transcript_data = transcript.fetch()
+
+    text = " ".join(
+        snippet.text
+        for snippet in transcript_data
+    )
+
+    return text
+
+
+def load_website(site):
+    loader = UnstructuredURLLoader(
+        urls=[site],
+        ssl_verify=False,
+        headers={"User-Agent": "Mozilla/5.0"},
+    )
+
+    docs = loader.load()
+
+    return "\n".join(doc.page_content for doc in docs)
+
+# -------------------- BUTTON --------------------
 
 if st.button("Summarize"):
 
     if not groq_api_key:
         st.error("Enter your Groq API Key.")
+        st.stop()
 
-    elif not generic_url:
-        st.error("Enter a URL.")
-
-    elif not validators.url(generic_url):
+    if not validators.url(url):
         st.error("Enter a valid URL.")
+        st.stop()
 
-    else:
+    try:
 
-        try:
+        with st.spinner("Loading content..."):
 
-            with st.spinner("Loading content..."):
+            if "youtube.com" in url or "youtu.be" in url:
+                text = load_youtube(url)
+            else:
+                text = load_website(url)
 
-                # ---------------- YouTube ----------------
+            prompt = f"""
+You are an expert summarizer.
 
-                if (
-                    "youtube.com" in generic_url
-                    or "youtu.be" in generic_url
-                ):
+The content below may be in Telugu, Hindi,
+English, or any other language.
 
-                    video_id = extract_video_id(generic_url)
+If it is not in English,
+first understand/translate it internally,
+then provide the summary ONLY in English.
 
-                    if video_id is None:
-                        st.error("Invalid YouTube URL.")
-                        st.stop()
+Provide:
 
-                    api = YouTubeTranscriptApi()
+• A concise summary
+• Important points
+• Final conclusion
 
-                    transcript = api.fetch(
-                        video_id,
-                        languages=["en"]
-                    )
+Content:
 
-                    text = " ".join(
-                        snippet.text
-                        for snippet in transcript
-                    )
+{text}
+"""
 
-                    docs = [
-                        Document(page_content=text)
-                    ]
+            response = llm.invoke(prompt)
 
-                # ---------------- Website ----------------
+            st.success("Summary Generated")
 
-                else:
+            st.write(response.content)
 
-                    loader = UnstructuredURLLoader(
-                        urls=[generic_url],
-                        ssl_verify=False,
-                        headers={
-                            "User-Agent": "Mozilla/5.0"
-                        }
-                    )
+    except Exception as e:
 
-                    docs = loader.load()
-
-                # ---------------- Chain ----------------
-
-                chain = load_summarize_chain(
-                    llm=llm,
-                    chain_type="stuff",
-                    prompt=prompt
-                )
-
-                result = chain.invoke(
-                    {
-                        "input_documents": docs
-                    }
-                )
-
-                st.success("Summary Generated")
-
-                st.write(result["output_text"])
-
-        except Exception as e:
-
-            st.error(str(e))
-            st.code(traceback.format_exc())
+        st.error(str(e))
+        st.code(traceback.format_exc())
