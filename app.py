@@ -11,8 +11,6 @@ from youtube_transcript_api import (
     TranscriptsDisabled,
 )
 
-# -------------------- STREAMLIT --------------------
-
 st.set_page_config(
     page_title="AI URL & YouTube Summarizer",
     page_icon="📝",
@@ -29,15 +27,12 @@ with st.sidebar:
 
 url = st.text_input("Enter Website or YouTube URL")
 
-# -------------------- LLM --------------------
-
 llm = ChatGroq(
     model="llama-3.3-70b-versatile",
     groq_api_key=groq_api_key,
     temperature=0
 )
 
-# -------------------- FUNCTIONS --------------------
 
 def extract_video_id(url):
     patterns = [
@@ -63,31 +58,24 @@ def load_youtube(video_url):
     api = YouTubeTranscriptApi()
 
     try:
-        # Latest youtube-transcript-api (v1.x)
-        fetched = api.fetch(video_id)
+        transcript = api.fetch(video_id)
 
-        # Convert transcript to text
         try:
             text = " ".join(
-                snippet.text for snippet in fetched
+                snippet.text for snippet in transcript
             )
         except Exception:
             text = " ".join(
-                item["text"]
-                for item in fetched.to_raw_data()
+                item["text"] for item in transcript.to_raw_data()
             )
 
         return text
 
     except NoTranscriptFound:
-        raise Exception(
-            "No transcript is available for this YouTube video."
-        )
+        raise Exception("No transcript is available for this video.")
 
     except TranscriptsDisabled:
-        raise Exception(
-            "Transcripts are disabled for this video."
-        )
+        raise Exception("Transcripts are disabled for this video.")
 
 
 def load_website(site):
@@ -96,17 +84,13 @@ def load_website(site):
         ssl_verify=False,
         headers={
             "User-Agent": "Mozilla/5.0"
-        },
+        }
     )
 
     docs = loader.load()
 
-    text = "\n".join(doc.page_content for doc in docs)
+    return "\n".join(doc.page_content for doc in docs)
 
-    return text
-
-
-# -------------------- BUTTON --------------------
 
 if st.button("Summarize"):
 
@@ -130,14 +114,11 @@ if st.button("Summarize"):
             prompt = f"""
 You are an expert AI summarizer.
 
-The content below may be written in Telugu, Hindi,
-English, or another language.
+The content below may be written in Telugu, Hindi, English, or another language.
 
-If it is not English, first understand or translate
-it internally, then provide the final answer ONLY in English.
+If it is not English, understand it and provide the summary only in English.
 
 Generate:
-
 1. Executive Summary
 2. Important Key Points
 3. Final Conclusion
