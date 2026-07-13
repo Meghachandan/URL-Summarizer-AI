@@ -3,11 +3,13 @@ import traceback
 import streamlit as st
 import validators
 
-from langchain_core.documents import Document
-from langchain_core.prompts import PromptTemplate
 from langchain_groq import ChatGroq
 from langchain_community.document_loaders import UnstructuredURLLoader
-from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api import (
+    YouTubeTranscriptApi,
+    NoTranscriptFound,
+    TranscriptsDisabled,
+)
 
 # -------------------- STREAMLIT --------------------
 
@@ -31,7 +33,8 @@ url = st.text_input("Enter Website or YouTube URL")
 
 llm = ChatGroq(
     model="llama-3.3-70b-versatile",
-    groq_api_key=groq_api_key
+    groq_api_key=groq_api_key,
+    temperature=0
 )
 
 # -------------------- FUNCTIONS --------------------
@@ -39,8 +42,8 @@ llm = ChatGroq(
 def extract_video_id(url):
     patterns = [
         r"v=([^&]+)",
-        r"youtu\.be/([^?]+)",
-        r"embed/([^?]+)"
+        r"youtu\.be/([^?&]+)",
+        r"embed/([^?&]+)",
     ]
 
     for pattern in patterns:
@@ -55,51 +58,69 @@ def load_youtube(video_url):
     video_id = extract_video_id(video_url)
 
     if not video_id:
-        raise Exception("Invalid YouTube URL")
+        raise Exception("Invalid YouTube URL.")
 
     api = YouTubeTranscriptApi()
 
-    transcript_list = api.list(video_id)
+    try:
+        # Latest youtube-transcript-api (v1.x)
+        fetched = api.fetch(video_id)
 
-    # Automatically pick the first available transcript
-    transcript = next(iter(transcript_list))
+        # Convert transcript to text
+        try:
+            text = " ".join(
+                snippet.text for snippet in fetched
+            )
+        except Exception:
+            text = " ".join(
+                item["text"]
+                for item in fetched.to_raw_data()
+            )
 
-    transcript_data = transcript.fetch()
+        return text
 
-    text = " ".join(
-        snippet.text
-        for snippet in transcript_data
-    )
+    except NoTranscriptFound:
+        raise Exception(
+            "No transcript is available for this YouTube video."
+        )
 
-    return text
+    except TranscriptsDisabled:
+        raise Exception(
+            "Transcripts are disabled for this video."
+        )
 
 
 def load_website(site):
     loader = UnstructuredURLLoader(
         urls=[site],
         ssl_verify=False,
-        headers={"User-Agent": "Mozilla/5.0"},
+        headers={
+            "User-Agent": "Mozilla/5.0"
+        },
     )
 
     docs = loader.load()
 
-    return "\n".join(doc.page_content for doc in docs)
+    text = "\n".join(doc.page_content for doc in docs)
+
+    return text
+
 
 # -------------------- BUTTON --------------------
 
 if st.button("Summarize"):
 
     if not groq_api_key:
-        st.error("Enter your Groq API Key.")
+        st.error("Please enter your Groq API Key.")
         st.stop()
 
     if not validators.url(url):
-        st.error("Enter a valid URL.")
+        st.error("Please enter a valid URL.")
         st.stop()
 
     try:
 
-        with st.spinner("Loading content..."):
+        with st.spinner("Loading..."):
 
             if "youtube.com" in url or "youtu.be" in url:
                 text = load_youtube(url)
@@ -107,20 +128,19 @@ if st.button("Summarize"):
                 text = load_website(url)
 
             prompt = f"""
-You are an expert summarizer.
+You are an expert AI summarizer.
 
-The content below may be in Telugu, Hindi,
-English, or any other language.
+The content below may be written in Telugu, Hindi,
+English, or another language.
 
-If it is not in English,
-first understand/translate it internally,
-then provide the summary ONLY in English.
+If it is not English, first understand or translate
+it internally, then provide the final answer ONLY in English.
 
-Provide:
+Generate:
 
-• A concise summary
-• Important points
-• Final conclusion
+1. Executive Summary
+2. Important Key Points
+3. Final Conclusion
 
 Content:
 
@@ -129,11 +149,10 @@ Content:
 
             response = llm.invoke(prompt)
 
-            st.success("Summary Generated")
+        st.success("Summary Generated Successfully!")
 
-            st.write(response.content)
+        st.markdown(response.content)
 
     except Exception as e:
-
         st.error(str(e))
         st.code(traceback.format_exc())
