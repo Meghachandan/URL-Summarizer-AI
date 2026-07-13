@@ -1,8 +1,7 @@
 import re
 import traceback
-
-import streamlit as st
 import validators
+import streamlit as st
 
 from langchain_core.prompts import PromptTemplate
 from langchain_core.documents import Document
@@ -11,62 +10,47 @@ from langchain.chains.summarize import load_summarize_chain
 from langchain_community.document_loaders import UnstructuredURLLoader
 from youtube_transcript_api import YouTubeTranscriptApi
 
-# -------------------------
-# Streamlit Config
-# -------------------------
+# ---------------- Streamlit ----------------
+
 st.set_page_config(
-    page_title="AI URL & YouTube Summarizer",
+    page_title="AI URL Summarizer",
     page_icon="📝",
     layout="wide"
 )
 
-st.title("AI URL & YouTube Summarizer")
-st.write("Summarize any YouTube video or Website using Groq LLM.")
+st.title("📝 AI URL & YouTube Summarizer")
 
-# -------------------------
-# Sidebar
-# -------------------------
 with st.sidebar:
     groq_api_key = st.text_input(
         "Groq API Key",
         type="password"
     )
 
-# -------------------------
-# URL Input
-# -------------------------
 generic_url = st.text_input(
     "Enter Website or YouTube URL"
 )
 
-# -------------------------
-# LLM
-# -------------------------
+# ---------------- LLM ----------------
+
 llm = ChatGroq(
     model="llama-3.3-70b-versatile",
     groq_api_key=groq_api_key
 )
 
-# -------------------------
-# Prompt
-# -------------------------
-prompt_template = """
-You are an expert summarizer.
+# ---------------- Prompt ----------------
 
-Summarize the following content in approximately 300 words.
+prompt = PromptTemplate(
+    template="""
+Summarize the following content in about 300 words.
 
 Content:
 {text}
-"""
-
-prompt = PromptTemplate(
-    template=prompt_template,
+""",
     input_variables=["text"]
 )
 
-# -------------------------
-# Helper Function
-# -------------------------
+# ---------------- Helper ----------------
+
 def extract_video_id(url):
     patterns = [
         r"v=([^&]+)",
@@ -81,19 +65,19 @@ def extract_video_id(url):
 
     return None
 
-# -------------------------
-# Button
-# -------------------------
+
+# ---------------- Button ----------------
+
 if st.button("Summarize"):
 
     if not groq_api_key:
-        st.error("Please enter your Groq API Key.")
+        st.error("Enter your Groq API Key.")
 
     elif not generic_url:
-        st.error("Please enter a URL.")
+        st.error("Enter a URL.")
 
     elif not validators.url(generic_url):
-        st.error("Please enter a valid URL.")
+        st.error("Enter a valid URL.")
 
     else:
 
@@ -101,9 +85,8 @@ if st.button("Summarize"):
 
             with st.spinner("Loading content..."):
 
-                # -------------------------
-                # YouTube
-                # -------------------------
+                # ---------------- YouTube ----------------
+
                 if (
                     "youtube.com" in generic_url
                     or "youtu.be" in generic_url
@@ -115,19 +98,24 @@ if st.button("Summarize"):
                         st.error("Invalid YouTube URL.")
                         st.stop()
 
-                    transcript = YouTubeTranscriptApi.get_transcript(video_id)
+                    api = YouTubeTranscriptApi()
+
+                    transcript = api.fetch(
+                        video_id,
+                        languages=["en"]
+                    )
 
                     text = " ".join(
-                        [item["text"] for item in transcript]
+                        snippet.text
+                        for snippet in transcript
                     )
 
                     docs = [
                         Document(page_content=text)
                     ]
 
-                # -------------------------
-                # Website
-                # -------------------------
+                # ---------------- Website ----------------
+
                 else:
 
                     loader = UnstructuredURLLoader(
@@ -135,25 +123,26 @@ if st.button("Summarize"):
                         ssl_verify=False,
                         headers={
                             "User-Agent": "Mozilla/5.0"
-                        },
+                        }
                     )
 
                     docs = loader.load()
 
-                # -------------------------
-                # Summarization Chain
-                # -------------------------
+                # ---------------- Chain ----------------
+
                 chain = load_summarize_chain(
                     llm=llm,
                     chain_type="stuff",
-                    prompt=prompt,
+                    prompt=prompt
                 )
 
                 result = chain.invoke(
-                    {"input_documents": docs}
+                    {
+                        "input_documents": docs
+                    }
                 )
 
-                st.success("Summary Generated Successfully!")
+                st.success("Summary Generated")
 
                 st.write(result["output_text"])
 
